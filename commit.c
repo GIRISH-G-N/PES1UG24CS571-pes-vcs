@@ -193,9 +193,62 @@ int head_update(const ObjectID *new_commit) {
 //   - head_update       : moves the branch pointer to your new commit
 //
 // Returns 0 on success, -1 on error.
+// Forward declaration for tree building
+int tree_from_index(ObjectID *id_out);
+
 int commit_create(const char *message, ObjectID *commit_id_out) {
-    // TODO: Implement commit creation
-    // (See Lab Appendix for logical steps)
-    (void)message; (void)commit_id_out;
-    return -1;
+    // 1. Build a tree object from the current index state
+    ObjectID tree_id;
+    if (tree_from_index(&tree_id) != 0) {
+        fprintf(stderr, "error: nothing to commit (index is empty or invalid)\n");
+        return -1;
+    }
+
+    // 2. Initialize the Commit structure
+    Commit c;
+    memset(&c, 0, sizeof(c));
+    c.tree = tree_id;
+    c.timestamp = (uint64_t)time(NULL);
+    
+    // Use the provided pes_author() helper from pes.h
+    strncpy(c.author, pes_author(), sizeof(c.author) - 1);
+    c.author[sizeof(c.author) - 1] = '\0';
+    
+    strncpy(c.message, message, sizeof(c.message) - 1);
+    c.message[sizeof(c.message) - 1] = '\0';
+
+    // 3. Set the parent commit by reading the current HEAD
+    // head_read returns 0 if a parent exists, -1 if it's the first commit
+    if (head_read(&c.parent) == 0) {
+        c.has_parent = 1;
+    } else {
+        c.has_parent = 0;
+    }
+
+    // 4. Serialize the commit data to text format
+    void *commit_data;
+    size_t commit_len;
+    if (commit_serialize(&c, &commit_data, &commit_len) != 0) {
+        return -1;
+    }
+
+    // 5. Write the commit object to the content-addressable store
+    ObjectID commit_id;
+    if (object_write(OBJ_COMMIT, commit_data, commit_len, &commit_id) != 0) {
+        free(commit_data);
+        return -1;
+    }
+    free(commit_data);
+
+    // 6. Move the branch pointer (HEAD) to this new commit
+    if (head_update(&commit_id) != 0) {
+        return -1;
+    }
+
+    // Output the resulting hash if requested
+    if (commit_id_out) {
+        *commit_id_out = commit_id;
+    }
+
+    return 0;
 }
